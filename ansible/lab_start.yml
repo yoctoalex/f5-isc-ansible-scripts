@@ -1,0 +1,4 @@
+- import_playbook: ./scripts/create_orgs.yml
+- import_playbook: ./scripts/create_eap_app.yml
+- import_playbook: ./scripts/update_dns_records.yml
+- import_playbook: ./scripts/update_user_status.yml

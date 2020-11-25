@@ -1,0 +1,46 @@
+- name: Create organizations and sibscribe to EAP
+  hosts: controller
+  gather_facts: false
+  collections:
+    - f5devcentral.cloudservices
+  connection: httpapi
+
+  vars:
+    ansible_network_os: f5devcentral.cloudservices.f5
+    ansible_host: "api.cloudservices.f5.com"
+    ansible_user: "{{ lookup('env','F5_USERNAME') }}"
+    ansible_httpapi_password: "{{ lookup('env','F5_PASSWORD') }}"
+    ansible_httpapi_use_ssl: yes
+    users_csv: "users.csv"
+
+  tasks:
+    - name: "Read user information"
+      read_csv:
+        path: "{{ users_csv }}"
+      register: users
+
+    - name: "Create an organization"
+      f5_cs_organization:
+        state: "present"
+        name: "{{ user.organization }}"
+        address:
+          street_1: "2310 153rd Ave Se"
+          street_2: ""
+          city: "Bellevue"
+          state: "WA"
+          country: "US"
+          postal_code: "98007-6342"
+        phone: ""
+      register: organizations
+      loop: "{{ users.list }}"
+      loop_control:
+        loop_var: user
+
+    - name: "Subscribe to eap"
+      f5_cs_catalog_items:
+        state: "present"
+        account_id: "{{ org.account_id }}"
+        service: "eap"
+      loop: "{{ organizations.results }}"
+      loop_control:
+        loop_var: org

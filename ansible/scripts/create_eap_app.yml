@@ -1,0 +1,213 @@
+- name: Create EAP app
+  hosts: controller
+  gather_facts: false
+  collections:
+    - f5devcentral.cloudservices
+  connection: httpapi
+
+  vars:
+    ansible_network_os: f5devcentral.cloudservices.f5
+    ansible_host: "api.cloudservices.f5.com"
+    ansible_user: "{{ lookup('env','F5_USERNAME') }}"
+    ansible_httpapi_password: "{{ lookup('env','F5_PASSWORD') }}"
+    ansible_httpapi_use_ssl: yes
+    users_csv: "users.csv"
+
+  tasks:
+    - name: "Read user information"
+      read_csv:
+        path: "{{ users_csv }}"
+      register: users
+
+    - name: "Get an organization"
+      f5_cs_organization:
+        state: "fetch"
+        name: "{{ user.organization }}"
+      register: organizations
+      loop: "{{ users.list }}"
+      loop_control:
+        loop_var: user
+
+    - name: Apply SSL Certificate from File
+      f5_cs_eap_certificate:
+        state: "present"
+        account_id: "{{ org.account_id }}"
+        certificate: "{{ lookup('file', '../../certs/securelab.online.crt') }}"
+        private_key: "{{ lookup('file', '../../certs/securelab.online.key') }}"
+        certificate_chain: "{{ lookup('file', '../../certs/securelab.online.chain') }}"
+        passphrase: "123456"
+      register: certificates
+      loop: "{{ organizations.results }}"
+      loop_control:
+        loop_var: org
+
+    - name: "Create EAP App"
+      f5_cs_eap_subscription_app:
+        account_id: "{{ cert.org.account_id }}"
+        service_instance_name: "{{ cert.org.user.record | lower }}.securelab.online"
+        patch: true
+        wait_status_change: false
+        waf_regions:
+          aws:
+            - name: "{{ cert.org.user.default_region }}"
+              value:
+                endpoint:
+                  http:
+                    enabled: true
+                    port: 80
+                  https:
+                    enabled: false
+                  ips:
+                    - "{{ cert.org.user.default_endpoint }}"
+        configuration:
+          waf_service:
+            application:
+              cache:
+                enabled: true
+                provider:
+                  cloudfront:
+                    behaviors:
+                      default:
+                        compression: true
+                        cookies:
+                          forward: "ALL"
+                          forward_list: [ ]
+                        headers:
+                          forward: "LIST"
+                          forward_list:
+                            - "Authorization"
+                            - "Accept"
+                            - "User-Agent"
+                            - "X-APP-TRUE"
+                    edge_tier: "EDGE_TIER_3"
+              description: "use '{{ cert.org.user.second_endpoint }}' ip and '{{ cert.org.user.second_region }}' region for the second endpoint"
+              fqdn: "{{ cert.org.user.record | lower }}.securelab.online"
+              http:
+                enabled: false
+                https_redirect: false
+                port: 80
+              https:
+                enabled: true
+                port: 443
+                tls:
+                  certificate_id: "{{ cert.certificate_id }}"
+                  version: "1.2"
+              ntlm: false
+            policy:
+              encoding: "utf-8"
+              compliance_enforcement:
+                enabled: true
+                data_guard:
+                  enabled: true
+                  cc: true
+                  ssn: true
+                sensitive_parameters:
+                  enabled: true
+                  parameters:
+                    - "cc_id"
+                    - "creditcard"
+                    - "passwd"
+                    - "password"
+                  xml_attributes: []
+                  xml_elements: []
+              high_risk_attack_mitigation:
+                enabled: true
+                enforcement_mode: "monitoring"
+                allowed_methods:
+                  enabled: true
+                  methods:
+                    - name: "GET"
+                    - name: "POST"
+                    - name: "HEAD"
+                api_compliance_enforcement:
+                  enabled: false
+                disallowed_file_types:
+                  enabled: true
+                  file_types:
+                    - "back"
+                    - "bat"
+                    - "bck"
+                    - "bin"
+                    - "cfg"
+                    - "cmd"
+                    - "com"
+                    - "config"
+                    - "dat"
+                    - "dll"
+                    - "eml"
+                    - "exe"
+                    - "exe1"
+                    - "exe_renamed"
+                    - "hta"
+                    - "htr"
+                    - "htw"
+                    - "ida"
+                    - "idc"
+                    - "idq"
+                    - "ini"
+                    - "old"
+                    - "sav"
+                    - "save"
+                geolocation_enforcement:
+                  enabled: true
+                  disallowed_country_codes:
+                    - "CU"
+                    - "IR"
+                    - "KP"
+                    - "LY"
+                    - "SD"
+                    - "SY"
+                http_compliance_enforcement:
+                  enabled: false
+                ip_enforcement:
+                  enabled: true
+                  ips: []
+                signature_enforcement:
+                  enabled: true
+              malicious_ip_enforcement:
+                enabled: true
+                enforcement_mode: "blocking"
+                ip_categories:
+                  - block: true
+                    log: true
+                    name: "mobile_threats"
+                  - block: true
+                    log: true
+                    name: "cloud_services"
+                  - block: true
+                    log: true
+                    name: "anonymous_proxies"
+                  - block: true
+                    log: true
+                    name: "phishing_proxies"
+                  - block: true
+                    log: true
+                    name: "infected_sources"
+                  - block: true
+                    log: true
+                    name: "denial_of_service"
+                  - block: true
+                    log: true
+                    name: "scanners"
+                  - block: true
+                    log: true
+                    name: "bot_nets"
+                  - block: true
+                    log: true
+                    name: "web_attacks"
+                  - block: true
+                    log: true
+                    name: "windows_exploits"
+                  - block: true
+                    log: true
+                    name: "spam_sources"
+                  - block: true
+                    log: true
+                    name: "tor_proxies"
+              threat_campaigns:
+                enabled: true
+                enforcement_mode: "blocking"
+                campaigns: []
+      loop: "{{ certificates.results }}"
+      loop_control:
+        loop_var: cert

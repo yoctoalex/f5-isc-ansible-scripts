@@ -1,0 +1,54 @@
+- name: Update DNS records
+  hosts: controller
+  gather_facts: false
+  collections:
+    - f5devcentral.cloudservices
+  connection: httpapi
+
+  vars:
+    ansible_network_os: f5devcentral.cloudservices.f5
+    ansible_host: "api.cloudservices.f5.com"
+    ansible_user: "{{ lookup('env','F5_USERNAME') }}"
+    ansible_httpapi_password: "{{ lookup('env','F5_PASSWORD') }}"
+    ansible_httpapi_use_ssl: yes
+    users_csv: "users.csv"
+    dns_server_api: "54.211.12.173"
+
+  tasks:
+    - name: "Read user information"
+      read_csv:
+        path: "{{ users_csv }}"
+      register: users
+
+    - name: "Get an organization"
+      f5_cs_organization:
+        state: "fetch"
+        name: "{{ user.organization }}"
+      register: organizations
+      loop: "{{ users.list }}"
+      loop_control:
+        loop_var: user
+
+    - name: "Fetch EAP Apps"
+      f5_cs_eap_subscription_app:
+        state: "fetch"
+        account_id: "{{ org.account_id }}"
+        service_instance_name: "{{ org.user.record | lower }}.securelab.online"
+      register: eap_apps
+      loop: "{{ organizations.results }}"
+      loop_control:
+        loop_var: org
+
+    - name: "Update DNS record"
+      uri:
+        url: "http://{{ dns_server_api }}/record/isc"
+        method: POST
+        force_basic_auth: yes
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_httpapi_password }}"
+        body: { "name": "{{ eap_app.org.user.record | lower }}", "type": "CNAME", "value": "{{ eap_app.configuration.details.CNAMEValue }}" }
+        body_format: json
+        status_code: 200
+      loop: "{{ eap_apps.results }}"
+      loop_control:
+        loop_var: eap_app
